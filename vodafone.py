@@ -25,7 +25,8 @@ def load_config():
         MQTT_PORT = config['mqtt']['port']
         MQTT_USERNAME = config['mqtt']['username']
         MQTT_PASSWORD = config['mqtt']['password']
-        MQTT_TOPIC_BASE = config['mqtt']['topic_base']
+        MQTT_TOPIC_DEV = config['mqtt']['topic_dev']
+        MQTT_TOPIC_DEVS = config['mqtt']['topic_devs']
             
         return {
             'ROUTER_IP': ROUTER_IP,
@@ -34,7 +35,8 @@ def load_config():
             'MQTT_PORT': MQTT_PORT,
             'MQTT_USERNAME': MQTT_USERNAME,
             'MQTT_PASSWORD': MQTT_PASSWORD,
-            'MQTT_TOPIC_BASE': MQTT_TOPIC_BASE
+            'MQTT_TOPIC_DEV': MQTT_TOPIC_DEV,
+            'MQTT_TOPIC_DEVS': MQTT_TOPIC_DEVS
         }
     except FileNotFoundError:
         raise FileNotFoundError("config.yml file not found")
@@ -131,24 +133,43 @@ def return_devices(lan_devices, wlan_devices):
     devices = []
     #print("LAN Devices:")
     for device in lan_devices:
-        #print(
-        #    f"Hostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        #)
+        print(
+            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
+        )
+        devices.append([device['HostName'], device['MAC'], "wired"])
+        devices.append(device['MAC'])
+    
+
+    #print("\nWi-Fi Devices:")
+    for device in wlan_devices:
+        print(
+            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
+        )
+        devices.append([device['HostName'], device['MAC'], "wireless"])
+        devices.append(device['MAC'])
+    
+    return devices
+
+def return_macs(lan_devices, wlan_devices):
+    devices = []
+    #print("LAN Devices:")
+    for device in lan_devices:
+        print(
+            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
+        )
         #devices.append([device['HostName'], device['MAC'], "wired"])
         devices.append(device['MAC'])
     
 
     #print("\nWi-Fi Devices:")
     for device in wlan_devices:
-        #print(
-        #    f"Hostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        #)
+        print(
+            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
+        )
         #devices.append([device['HostName'], device['MAC'], "wireless"])
         devices.append(device['MAC'])
     
     return devices
-
-
 
 # Publish devices to MQTT
 def publish_devices(MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, MQTT_TOPIC, devices):
@@ -156,18 +177,28 @@ def publish_devices(MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, MQTT_T
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
-    payload = {"devices": [{"name": d[0], "mac": d[1], "type": d[2]} for d in devices]}
-    print("\n", payload)
+    #print(devices)
+
+    #payload = [d for d in devices]
+
+    #From a list make a string with each element on a new line
+    payload = " ".join(devices)
+
+    #payload = {"devices": [{"name": d[0], "mac": d[1], "type": d[2]} for d in devices]}
+    #print("\n", payload)
+
+    print(f"Published {len(devices)} devices.")
+
     client.publish(MQTT_TOPIC, json.dumps(payload))
     client.disconnect()
 
 
-def publish_state(MQTT_USERNAME, MQTT_PASSWORD, MQTT_BROKER, MQTT_PORT, MQTT_TOPIC_BASE, device_mac, state):
+def publish_state(MQTT_USERNAME, MQTT_PASSWORD, MQTT_BROKER, MQTT_PORT, MQTT_TOPIC_DEV, device_mac, state):
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
 
-    topic = f"{MQTT_TOPIC_BASE}/{device_mac}/state"
+    topic = f"{MQTT_TOPIC_DEV}/{device_mac}/state"
     client.publish(topic, state)
     print(f"Published {state} for {device_mac} to {topic}")
 
@@ -182,15 +213,18 @@ if __name__ == "__main__":
             router = Router(config['ROUTER_IP'], config['ROUTER_PASSWORD'])
             if router.login():
                 lan_devices, wlan_devices = router.get_devices() 
-                new_devices = return_devices(lan_devices, wlan_devices)
+                new_devices = return_macs(lan_devices, wlan_devices)
                 router.logout()
 
-                print("Scan statistics:")
+                print("\nScan statistics:")
                 print(f"\tNew devices: ", len(new_devices))
                 print(f"\tOld devices: ", len(old_devices))
                 print("\n\tConnected devices:")
-                for i in new_devices:
-                    print(f"\t\t{i}")
+                #for i in new_devices:
+                #    print(f"\t\t{i}")
+
+                # Publish device list to MQTT_TOPIC_DEVS
+                publish_devices(config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_TOPIC_DEVS'], new_devices)    
 
                 # Find newly connected devices
                 if old_devices == []:
@@ -207,14 +241,14 @@ if __name__ == "__main__":
                 if connected:
                     for device in connected:
                         print(f"Device connected: {device}")
-                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_BASE'], device, "connected")
+                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_DEV'], device, "connected")
 
                 # Find disconnected devices  
                 disconnected = set(old_devices) - set(new_devices)
                 if disconnected:
                     for device in disconnected:
                         print(f"Device disconnected: {device}")
-                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_BASE'], device, "disconnected")
+                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_DEV'], device, "disconnected")
 
                 old_devices = new_devices
                 router.logout()  

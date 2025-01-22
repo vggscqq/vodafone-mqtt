@@ -1,0 +1,90 @@
+from pathlib import Path
+import yaml
+import paho.mqtt.client as mqtt
+
+def load_config():
+    try:
+        config_path = Path('config.yml')
+        with open(config_path, 'r') as file:
+            config = yaml.safe_load(file)
+
+        # Create variables from config
+        MQTT_BROKER = config['mqtt']['broker']
+        MQTT_PORT = config['mqtt']['port']
+        MQTT_USERNAME = config['mqtt']['username']
+        MQTT_PASSWORD = config['mqtt']['password']
+        MQTT_TOPIC_BASE = config['mqtt']['topic_base']
+
+        MQTT_POIS = {}
+        for poi in list(config['spl'].keys()):
+            MQTT_POIS[poi] = []
+            for poi_mac in config['spl'][poi]['macs']:
+                MQTT_POIS[poi].append(poi_mac)
+
+        return {
+            'MQTT_BROKER': MQTT_BROKER,
+            'MQTT_PORT': MQTT_PORT,
+            'MQTT_USERNAME': MQTT_USERNAME,
+            'MQTT_PASSWORD': MQTT_PASSWORD,
+            'MQTT_TOPIC_BASE': MQTT_TOPIC_BASE,
+            'MQTT_POIS': MQTT_POIS
+        }
+    except FileNotFoundError:
+        raise FileNotFoundError("config.yml file not found")
+    except yaml.YAMLError as e:
+        raise ValueError(f"Error parsing config.yml: {str(e)}")
+    except KeyError as e:
+        raise KeyError(f"Missing required configuration key: {str(e)}")
+
+config = load_config()
+
+# Variable to store POI status (connected/disconnected)
+pois_status = {poi: False for poi in config['MQTT_POIS']}
+
+# Callback for when the client connects to the broker
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        print("Connected to MQTT broker!")
+
+        for poi in config['MQTT_POIS']:
+            for mac in config['MQTT_POIS'][poi]:
+                topic = f"home/devices/{mac}/state"
+                client.subscribe(topic)
+                print(f"Subscribed to topic: {topic}")
+    else:
+        print(f"Failed to connect, return code {rc}")
+
+# Callback for when a message is received
+def on_message(client, userdata, msg):
+    global pois_status
+
+    for poi, macs in config['MQTT_POIS'].items():
+        if msg.topic in [f"home/devices/{mac}/state" for mac in macs]:
+            payload = msg.payload.decode()
+            print(f"Message received on topic {msg.topic}: {payload}")
+
+            # Update the connection status of the POI
+            if payload == 'connected':
+                pois_status[poi] = True
+            elif payload == 'disconnected':
+                # Check if any device for this POI is still connected
+                connected_devices = [mac for mac in macs if pois_status[poi]]
+                if not connected_devices:
+                    pois_status[poi] = False
+
+            # Print presence status for the specific POI
+            presence = "YES" if pois_status[poi] else "NO"
+            print(f"[{poi}] Presence: {presence}")
+            break
+
+# Initialize MQTT client
+client = mqtt.Client()
+client.username_pw_set(config['MQTT_USERNAME'], config['MQTT_PASSWORD'])
+client.on_connect = on_connect
+client.on_message = on_message
+
+# Connect to the MQTT broker
+client.connect(config['MQTT_BROKER'], config['MQTT_PORT'], 60)
+
+# Start the loop
+client.loop_forever()
