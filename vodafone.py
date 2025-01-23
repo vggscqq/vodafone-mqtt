@@ -8,6 +8,8 @@ import paho.mqtt.client as mqtt
 import yaml
 from pathlib import Path
 import time
+import signal
+from prettytable import PrettyTable
 
 SLEEP_TIMEOUT = 10
 
@@ -16,27 +18,32 @@ def load_config():
         config_path = Path('config.yml')
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-            
-        # Create variables from config
-        ROUTER_IP = config['router']['ip']
-        ROUTER_PASSWORD = config['router']['password']
         
+        # Load MQTT config
         MQTT_BROKER = config['mqtt']['broker']
         MQTT_PORT = config['mqtt']['port']
         MQTT_USERNAME = config['mqtt']['username']
         MQTT_PASSWORD = config['mqtt']['password']
         MQTT_TOPIC_DEV = config['mqtt']['topic_dev']
         MQTT_TOPIC_DEVS = config['mqtt']['topic_devs']
-            
+        MQTT_TOPIC_DLOI = config['mqtt']['topic_dloi']
+        
+        # Load DLOIs
+        MQTT_DLOIS = {}
+        for dloi in config['dloi']:
+            MQTT_DLOIS[dloi] = config['dloi'][dloi]['macs']
+        
         return {
-            'ROUTER_IP': ROUTER_IP,
-            'ROUTER_PASSWORD': ROUTER_PASSWORD,
+            'ROUTER_IP': config['router']['ip'],
+            'ROUTER_PASSWORD': config['router']['password'],
             'MQTT_BROKER': MQTT_BROKER,
             'MQTT_PORT': MQTT_PORT,
             'MQTT_USERNAME': MQTT_USERNAME,
             'MQTT_PASSWORD': MQTT_PASSWORD,
             'MQTT_TOPIC_DEV': MQTT_TOPIC_DEV,
-            'MQTT_TOPIC_DEVS': MQTT_TOPIC_DEVS
+            'MQTT_TOPIC_DEVS': MQTT_TOPIC_DEVS,
+            'MQTT_TOPIC_DLOI': MQTT_TOPIC_DLOI,
+            'MQTT_DLOIS': MQTT_DLOIS,
         }
     except FileNotFoundError:
         raise FileNotFoundError("config.yml file not found")
@@ -116,10 +123,12 @@ class Router:
                 re.search(r"json_primaryWlanAttachedDevice = (.+);", raw_html)[1]
             )
             return lan_devices, wlan_devices
-        except Exception as e:
-            print(f"Error fetching device data: {e}")
-            print(f"Sleeping for {SLEEP_TIMEOUT*2}seconds...")
-            time.sleep(SLEEP_TIMEOUT*2)
+        except Exception:
+            if r.status_code == 400:
+                print("400 error, sleeping for 15 minutes...")
+                print("Either someone is logged in or old session is still active.")
+                time.sleep(60*15)
+
             return [], []
 
     def logout(self):
@@ -128,140 +137,100 @@ class Router:
         except Exception as e:
             print(f"Logout error: {e}")
 
-
-def return_devices(lan_devices, wlan_devices):
-    devices = []
-    #print("LAN Devices:")
-    for device in lan_devices:
-        print(
-            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        )
-        devices.append([device['HostName'], device['MAC'], "wired"])
-        devices.append(device['MAC'])
-    
-
-    #print("\nWi-Fi Devices:")
-    for device in wlan_devices:
-        print(
-            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        )
-        devices.append([device['HostName'], device['MAC'], "wireless"])
-        devices.append(device['MAC'])
-    
-    return devices
+# Signal handler for graceful shutdown
+def handle_sigterm(signum, frame):
+    global keep_running
+    print("Received SIGTERM, shutting down gracefully...")
+    keep_running = False
 
 def return_macs(lan_devices, wlan_devices):
     devices = []
-    #print("LAN Devices:")
-    for device in lan_devices:
-        print(
-            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        )
-        #devices.append([device['HostName'], device['MAC'], "wired"])
+    for device in lan_devices + wlan_devices:
         devices.append(device['MAC'])
-    
-
-    #print("\nWi-Fi Devices:")
-    for device in wlan_devices:
-        print(
-            f"\tHostname: {device['HostName']}, MAC: {device['MAC']}, IPv4: {device['IPv4']}"
-        )
-        #devices.append([device['HostName'], device['MAC'], "wireless"])
-        devices.append(device['MAC'])
-    
     return devices
 
-# Publish devices to MQTT
-def publish_devices(MQTT_BROKER, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD, MQTT_TOPIC, devices):
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-
-    #print(devices)
-
-    #payload = [d for d in devices]
-
-    #From a list make a string with each element on a new line
+def publish_devices(client, topic, devices):
     payload = " ".join(devices)
+    client.publish(topic, json.dumps(payload))
+    print(f"Published {len(devices)} devices to {topic}.")
 
-    #payload = {"devices": [{"name": d[0], "mac": d[1], "type": d[2]} for d in devices]}
-    #print("\n", payload)
-
-    print(f"Published {len(devices)} devices.")
-
-    client.publish(MQTT_TOPIC, json.dumps(payload))
-    client.disconnect()
-
-
-def publish_state(MQTT_USERNAME, MQTT_PASSWORD, MQTT_BROKER, MQTT_PORT, MQTT_TOPIC_DEV, device_mac, state):
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-
-    topic = f"{MQTT_TOPIC_DEV}/{device_mac}/state"
+def publish_state(client, topic_base, device_mac, state):
+    topic = f"{topic_base}/{device_mac}/state"
     client.publish(topic, state)
     print(f"Published {state} for {device_mac} to {topic}")
 
-if __name__ == "__main__":
+def publish_dloi_state(client, topic_base, dloi_name, state):
+    topic = f"{topic_base}/{dloi_name}"
+    client.publish(topic, state)
+    print(f"Published DLOI state {state} for {dloi_name} to {topic}")
 
+def print_pretty_device_table(lan_devices, wlan_devices):
+    # Print connected devices in a pretty table
+
+    # LAN Devices Table
+    lan_table = PrettyTable()
+    lan_table.field_names = ["HostName", "MAC", "IPv4"]
+    for device in lan_devices:
+        lan_table.add_row([device['HostName'], device['MAC'], device['IPv4']])
+
+    print("LAN Devices:")
+    print(lan_table)
+    print()
+    # WLAN Devices Table
+    wlan_table = PrettyTable()
+    wlan_table.field_names = ["HostName", "MAC", "IPv4"]
+    for device in wlan_devices:
+        wlan_table.add_row([device['HostName'], device['MAC'], device['IPv4']])
+
+    print("WLAN Devices:")
+    print(wlan_table)
+    print()
+
+# Global flag to indicate whether the program should keep running
+keep_running = True
+
+# Register the signal handler
+signal.signal(signal.SIGTERM, handle_sigterm)
+
+if __name__ == "__main__":
     config = load_config()
     router = Router(config['ROUTER_IP'], config['ROUTER_PASSWORD'])
     old_devices = []
 
     try:
-        while True:
-            router = Router(config['ROUTER_IP'], config['ROUTER_PASSWORD'])
+        client = mqtt.Client()
+        client.username_pw_set(config['MQTT_USERNAME'], config['MQTT_PASSWORD'])
+        client.connect(config['MQTT_BROKER'], config['MQTT_PORT'], 60)
+            
+        while keep_running:
             if router.login():
-                lan_devices, wlan_devices = router.get_devices() 
+                lan_devices, wlan_devices = router.get_devices()
                 new_devices = return_macs(lan_devices, wlan_devices)
                 router.logout()
 
-                print("\nScan statistics:")
-                print(f"\tNew devices: ", len(new_devices))
-                print(f"\tOld devices: ", len(old_devices))
-                print("\n\tConnected devices:")
-                #for i in new_devices:
-                #    print(f"\t\t{i}")
+                print(f"Scan finished!\nFound {len(lan_devices)} LAN and {len(wlan_devices)} WLAN devices.")
+                print_pretty_device_table(lan_devices, wlan_devices)
 
-                # Publish device list to MQTT_TOPIC_DEVS
-                publish_devices(config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_TOPIC_DEVS'], new_devices)    
-
-                # Find newly connected devices
-                if old_devices == []:
-                    if not new_devices == []:
-                        print("Initial device scan completed.")
-                    else:
-                        print("Initial device scan failed. Will try in 30 seconds...")
-                    old_devices = new_devices
-                    print(f"Sleeping for {SLEEP_TIMEOUT} seconds...\n")
-                    time.sleep(SLEEP_TIMEOUT)
-                    continue
-
-                connected = set(new_devices) - set(old_devices)
-                if connected:
+                if old_devices:
+                    connected = set(new_devices) - set(old_devices)
+                    disconnected = set(old_devices) - set(new_devices)
+                    
                     for device in connected:
-                        print(f"Device connected: {device}")
-                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_DEV'], device, "connected")
-
-                # Find disconnected devices  
-                disconnected = set(old_devices) - set(new_devices)
-                if disconnected:
+                        publish_state(client, config['MQTT_TOPIC_DEV'], device, "connected")
                     for device in disconnected:
-                        print(f"Device disconnected: {device}")
-                        publish_state(config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_TOPIC_DEV'], device, "disconnected")
-
+                        publish_state(client, config['MQTT_TOPIC_DEV'], device, "disconnected")
+                
                 old_devices = new_devices
-                router.logout()  
 
-            print(f"Sleeping for {SLEEP_TIMEOUT}seconds...\n")
-            time.sleep(SLEEP_TIMEOUT)
-    except KeyboardInterrupt:
+                # Check DLOI states
+                for dloi_name, dloi_macs in config['MQTT_DLOIS'].items():
+                    dloi_present = bool(set(dloi_macs) & set(new_devices))
+                    publish_dloi_state(client, config['MQTT_TOPIC_DLOI'], dloi_name, dloi_present)
+
+                print(f"Sleeping for {SLEEP_TIMEOUT} seconds...\n")
+                time.sleep(SLEEP_TIMEOUT)
+
+    finally:
         print("Interrupted, logging out.")
         router.logout()
-
-    #if router.login():
-    #    lan_devices, wlan_devices = router.get_devices()
-    #    devices = return_devices(lan_devices, wlan_devices)
-    #    router.logout()
-    #    #publish_devices(config['MQTT_BROKER'], config['MQTT_PORT'], config['MQTT_USERNAME'], config['MQTT_PASSWORD'], config['MQTT_TOPIC'], devices)
-
+        client.disconnect()
