@@ -1,0 +1,6 @@
+requests
+pycrypto
+paho-mqtt
+pyyaml
+pycryptodome
+prettytable

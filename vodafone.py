@@ -27,10 +27,12 @@ def load_config():
         return {
             'ROUTER_IP':        config['router']['ip'],
             'ROUTER_PASSWORD':  config['router']['password'],
+
             'MQTT_BROKER':      config['mqtt']['broker'],
             'MQTT_PORT':        config['mqtt']['port'],
             'MQTT_USERNAME':    config['mqtt']['username'],
             'MQTT_PASSWORD':    config['mqtt']['password'],
+            
             'MQTT_TOPIC_DEV':   config['mqtt']['topic_dev'],
             'MQTT_TOPIC_DEVS':  config['mqtt']['topic_devs'],
             'MQTT_TOPIC_DLOI':  config['mqtt']['topic_dloi'],
