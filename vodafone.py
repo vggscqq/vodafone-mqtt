@@ -19,32 +19,24 @@ def load_config():
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         
-        # Load MQTT config
-        MQTT_BROKER = config['mqtt']['broker']
-        MQTT_PORT = config['mqtt']['port']
-        MQTT_USERNAME = config['mqtt']['username']
-        MQTT_PASSWORD = config['mqtt']['password']
-        MQTT_TOPIC_DEV = config['mqtt']['topic_dev']
-        MQTT_TOPIC_DEVS = config['mqtt']['topic_devs']
-        MQTT_TOPIC_DLOI = config['mqtt']['topic_dloi']
-        
         # Load DLOIs
         MQTT_DLOIS = {}
         for dloi in config['dloi']:
             MQTT_DLOIS[dloi] = config['dloi'][dloi]['macs']
         
         return {
-            'ROUTER_IP': config['router']['ip'],
-            'ROUTER_PASSWORD': config['router']['password'],
-            'MQTT_BROKER': MQTT_BROKER,
-            'MQTT_PORT': MQTT_PORT,
-            'MQTT_USERNAME': MQTT_USERNAME,
-            'MQTT_PASSWORD': MQTT_PASSWORD,
-            'MQTT_TOPIC_DEV': MQTT_TOPIC_DEV,
-            'MQTT_TOPIC_DEVS': MQTT_TOPIC_DEVS,
-            'MQTT_TOPIC_DLOI': MQTT_TOPIC_DLOI,
-            'MQTT_DLOIS': MQTT_DLOIS,
+            'ROUTER_IP':        config['router']['ip'],
+            'ROUTER_PASSWORD':  config['router']['password'],
+            'MQTT_BROKER':      config['mqtt']['broker'],
+            'MQTT_PORT':        config['mqtt']['port'],
+            'MQTT_USERNAME':    config['mqtt']['username'],
+            'MQTT_PASSWORD':    config['mqtt']['password'],
+            'MQTT_TOPIC_DEV':   config['mqtt']['topic_dev'],
+            'MQTT_TOPIC_DEVS':  config['mqtt']['topic_devs'],
+            'MQTT_TOPIC_DLOI':  config['mqtt']['topic_dloi'],
+            'MQTT_DLOIS':       MQTT_DLOIS,
         }
+    
     except FileNotFoundError:
         raise FileNotFoundError("config.yml file not found")
     except yaml.YAMLError as e:
@@ -143,22 +135,30 @@ def handle_sigterm(signum, frame):
     print("Received SIGTERM, shutting down gracefully...")
     keep_running = False
 
+# Function returns list of MAC addresses
+# Example output: ["AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"]
 def return_macs(lan_devices, wlan_devices):
     devices = []
     for device in lan_devices + wlan_devices:
         devices.append(device['MAC'])
     return devices
 
+# Function publishes list of MAC addresses to specified MQTT topic
+# Example output: "["AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"]"
 def publish_devices(client, topic, devices):
     payload = " ".join(devices)
     client.publish(topic, json.dumps(payload))
     print(f"Published {len(devices)} devices to {topic}.")
 
+# Function publishes device state to MQTT topic for a specific MAC address
+# Example output: topic: "MQTT_TOPIC_DEV/AA:BB:CC:DD:EE:FF/state", payload: "connected"
 def publish_state(client, topic_base, device_mac, state):
     topic = f"{topic_base}/{device_mac}/state"
     client.publish(topic, state)
     print(f"Published {state} for {device_mac} to {topic}")
 
+# Function publishes DLOI (Device Location Of Interest) state to specified MQTT topic
+# Example output: topic: "MQTT_TOPIC_DLOI/example-device-list", payload: True
 def publish_dloi_state(client, topic_base, dloi_name, state):
     topic = f"{topic_base}/{dloi_name}"
     client.publish(topic, state)
@@ -176,6 +176,7 @@ def print_pretty_device_table(lan_devices, wlan_devices):
     print("LAN Devices:")
     print(lan_table)
     print()
+    
     # WLAN Devices Table
     wlan_table = PrettyTable()
     wlan_table.field_names = ["HostName", "MAC", "IPv4"]
@@ -208,7 +209,7 @@ if __name__ == "__main__":
                 new_devices = return_macs(lan_devices, wlan_devices)
                 router.logout()
 
-                print(f"Scan finished!\nFound {len(lan_devices)} LAN and {len(wlan_devices)} WLAN devices.")
+                print(f"[{time.strftime('%d.%m.%Y %H:%M')}] Scan finished!\nFound {len(lan_devices)} LAN and {len(wlan_devices)} WLAN devices.")
                 print_pretty_device_table(lan_devices, wlan_devices)
 
                 if old_devices:
@@ -229,7 +230,6 @@ if __name__ == "__main__":
 
                 print(f"Sleeping for {SLEEP_TIMEOUT} seconds...\n")
                 time.sleep(SLEEP_TIMEOUT)
-
     finally:
         print("Interrupted, logging out.")
         router.logout()
