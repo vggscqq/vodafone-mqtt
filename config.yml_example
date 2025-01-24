@@ -5,6 +5,14 @@ router:
 mqtt:
   broker: "192.168.0.102"
   port: 1883
-  username: "mqtt-user"
-  password: "mqttpassword"
-  topic_base: "home/devices"
+  username: "username"
+  password: "password"
+  topic_dev: "vodafone/device"
+  topic_devs: "vodafone/devices/connected"
+  topic_dloi: "vodafone/dloi"
+
+dloi:
+  vgscq-laptop-dock:
+    macs: ['00:00:00:00:00:00']
+  multiple-devices-example:
+    macs: ['00:00:00:00:00:00', '11:11:11:11:11:11']

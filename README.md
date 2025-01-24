@@ -8,7 +8,7 @@ This project provides an MQTT exporter to monitor device connectivity for Vodafo
 - **Firmware Version:** `AR01.04.137.04_021624_7249.PC20.10`
 - **Hardware Version:** `11`
 
-The exporter can be integrated to Home Assistant.
+The exporter can be integrated with Home Assistant or other MQTT-compatible platforms to provide real-time network monitoring and automation.
 
 ## Example Home Assistant Configuration
 To use this exporter with Home Assistant, add the following configuration to your `configuration.yml` file:
@@ -16,21 +16,47 @@ To use this exporter with Home Assistant, add the following configuration to you
 ```yaml
 mqtt:
   sensor:
-    - name: "vgscq-phone State"
-      state_topic: "home/devices/aa:aa:aa:aa:aa:aa/state"
-      unique_id: "aa:aa:aa:aa:aa:aa_state"
-      availability:
-        - topic: "home/devices/aa:aa:aa:aa:aa:aa/state"
+    device_tracker:
+    - name: "vgscq | Laptop Dock"
+      state_topic: "vodafone/dloi/vgscq-laptop-dock"
+      payload_on: "True"
+      payload_off: "False"
 ```
-
-This configuration listens to the state of a device with MAC address `aa:aa:aa:aa:aa:aa`. When the device connects or disconnects from the network, the MQTT client publishes `"connected"` or `"disconnected"` messages to the `home/devices/aa:aa:aa:aa:aa:aa/state` topic.
 
 ## Features
 - Monitors connectivity of devices on your router.
 - Publishes real-time device states (`connected` or `disconnected`) to MQTT topics.
+  - Per device: `vodafone/device/{MAC}/state`
+  - All devices: `vodafone/devices/connected`
+- Supports Device List of Interest (DLOI):
+  - Publishes True if any device from a list is connected, and False if none are connected:
+    - `vodafone/dloi/{dloi_name}`
 
-### Planned Features (TODO)
-- Publish the total number of devices connected on LAN and Wi-Fi.
+### Device list of Interest (DLOI)
+  - The same thing but publishes `True` if any device from the list is connected and `False` if none.
+
+## Installation and Usage
+1. Clone the repository:
+
+```bash
+git clone https://github.com/vggscqq/vodafone-mqtt.git
+cd vodafone-mqtt
+```
+
+2. Install the dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+3. Create a config.yml file in the root directory with your router and MQTT configuration:
+[config.yml](https://github.com/vggscqq/vodafone-mqtt/blob/main/config.yml_example)
+
+4. Run the script:
+```bash
+python vodafone_mqtt.py
+```
+
+5. Integrate to Home Assistant.
 
 ## Contribution
 If your router is supported or you add support for a different firmware or hardware version, feel free to contribute back to this project.
