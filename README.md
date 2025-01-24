@@ -16,11 +16,24 @@ To use this exporter with Home Assistant, add the following configuration to you
 ```yaml
 mqtt:
   sensor:
-    device_tracker:
-    - name: "vgscq | Laptop Dock"
-      state_topic: "vodafone/dloi/vgscq-laptop-dock"
-      payload_on: "True"
-      payload_off: "False"
+  - name: "Example sensor"
+    state_topic: "home/devices/aa:aa:aa:aa:aa:aa/state"
+    unique_id: "aa:aa:aa:aa:aa:aa_state"
+    availability:
+      - topic: "home/devices/aa:aa:aa:aa:aa:aa/state"
+
+  binary_sensor:
+  - name: "Example binary sensor"
+    state_topic: "home/devices/aa:aa:aa:aa:aa:aa/state"
+    payload_on: "connected"
+    payload_off: "disconnected"
+    device_class: presence
+
+  device_tracker:
+  - name: "Example device tracker based on DLOI"
+    state_topic: "vodafone/dloi/test-device-list"
+    payload_on: "True"
+    payload_off: "False"
 ```
 
 ## Features
